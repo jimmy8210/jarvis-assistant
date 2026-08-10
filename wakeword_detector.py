@@ -12,6 +12,56 @@ from vosk import Model as VoskModel, KaldiRecognizer, SetLogLevel
 SetLogLevel(-1)
 
 
+# App configurations for voice command execution
+APPS_CONFIG = {
+    "antigravity": {
+        "keywords": ["antigravity"],
+        "display_name": "Antigravity IDE",
+        "action": lambda: os.system('start "" "C:\\Users\\Jimmy\\AppData\\Local\\Programs\\antigravity\\Antigravity.exe"'),
+    },
+    "calculator": {
+        "keywords": ["calculator", "calc"],
+        "display_name": "Calculator",
+        "action": lambda: os.system("start calc.exe"),
+    },
+    "notion": {
+        "keywords": ["notion"],
+        "display_name": "Notion",
+        "action": lambda: os.system('start "" "C:\\Users\\Jimmy\\AppData\\Local\\Programs\\Notion\\Notion.exe"'),
+    },
+    "obsidian": {
+        "keywords": ["obsidian"],
+        "display_name": "Obsidian",
+        "action": lambda: os.system('start "" "C:\\Users\\Jimmy\\AppData\\Local\\Programs\\Obsidian\\Obsidian.exe"'),
+    },
+    "ollama": {
+        "keywords": ["ollama"],
+        "display_name": "Ollama",
+        "action": lambda: os.system('start "" "C:\\Users\\Jimmy\\AppData\\Local\\Programs\\Ollama\\ollama app.exe"'),
+    },
+    "whatsapp": {
+        "keywords": ["whatsapp"],
+        "display_name": "WhatsApp",
+        "action": lambda: os.system("start whatsapp:"),
+    },
+    "youtube": {
+        "keywords": ["youtube", "utube"],
+        "display_name": "YouTube (Brave App)",
+        "action": lambda: os.system('start "" "C:\\Users\\Jimmy\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Brave Apps\\YouTube.lnk"'),
+    },
+    "editor": {
+        "keywords": ["editor", "notepad"],
+        "display_name": "Notepad / Editor",
+        "action": lambda: os.system("start notepad.exe"),
+    },
+    "browser": {
+        "keywords": ["browser", "chrome", "edge", "web", "google", "internet"],
+        "display_name": "Web Browser",
+        "action": lambda: webbrowser.open("https://www.google.com"),
+    },
+}
+
+
 def process_command(command_text: str) -> bool:
     """
     Processes recognized text using 'contains keyword' matching logic.
@@ -27,7 +77,19 @@ def process_command(command_text: str) -> bool:
         print("🛑 Stop keyword detected! Shutting down Jarvis voice loop...")
         return True
 
-    # Contains-keyword matching for actions
+    # Check for registered application commands
+    app_launched = False
+    for app_id, app_info in APPS_CONFIG.items():
+        if any(kw in cmd_lower for kw in app_info["keywords"]):
+            print(f"🚀 [Jarvis Action]: Opening {app_info['display_name']}...")
+            app_info["action"]()
+            app_launched = True
+            break
+
+    if app_launched:
+        return False
+
+    # Contains-keyword matching for other non-app actions
     if "time" in cmd_lower:
         current_time_str = time.strftime("%I:%M %p")
         print(f"⏰ [Jarvis Action]: The current time is {current_time_str}")
@@ -36,14 +98,8 @@ def process_command(command_text: str) -> bool:
         print(f"📅 [Jarvis Action]: Today's date is {current_date_str}")
     elif "name" in cmd_lower:
         print("🤖 [Jarvis Action]: My name is Jarvis, your AI assistant.")
-    elif "editor" in cmd_lower:
-        print("📝 [Jarvis Action]: Opening Notepad / Editor...")
-        os.system("start notepad.exe")
-    elif any(kw in cmd_lower for kw in ["browser", "chrome", "edge", "web", "google", "internet"]):
-        print("🌐 [Jarvis Action]: Opening default web browser...")
-        webbrowser.open("https://www.google.com")
     elif "open" in cmd_lower:
-        # Extract target app or word after 'open' using contains logic
+        # Generic fallback for unknown open commands
         target = cmd_lower.split("open", 1)[1].strip()
         print(f"🚀 [Jarvis Action]: Opening '{target if target else 'requested item'}'...")
     elif "how are you" in cmd_lower:
