@@ -1,3 +1,7 @@
 venv/
 __pycache__/
 *.pyc
+
+# API Keys & Sensitive Config
+config.py
+.env

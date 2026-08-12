@@ -1,4 +1,14 @@
+"""
+Jarvis Assistant - Voice Control System
+=======================================
+
+Wake word detection via openWakeWord + Vosk speech-to-text.
+LLM-driven command interpretation via Gemini API (gemini-3.6-flash).
+Dynamic Windows application launcher with zero hardcoded file paths.
+"""
+
 import os
+import sys
 import json
 import time
 import argparse
@@ -8,106 +18,65 @@ import pyaudio
 from openwakeword.model import Model
 from vosk import Model as VoskModel, KaldiRecognizer, SetLogLevel
 
+from llm_handler import GeminiLLM
+from app_launcher import launch_application
+
+# Force UTF-8 encoding for Windows console compatibility
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # Suppress verbose Vosk C++ logs
 SetLogLevel(-1)
 
 
-# App configurations for voice command execution
-APPS_CONFIG = {
-    "antigravity": {
-        "keywords": ["antigravity"],
-        "display_name": "Antigravity IDE",
-        "action": lambda: os.system('start "" "C:\\Users\\Jimmy\\AppData\\Local\\Programs\\antigravity\\Antigravity.exe"'),
-    },
-    "calculator": {
-        "keywords": ["calculator", "calc"],
-        "display_name": "Calculator",
-        "action": lambda: os.system("start calc.exe"),
-    },
-    "notion": {
-        "keywords": ["notion"],
-        "display_name": "Notion",
-        "action": lambda: os.system('start "" "C:\\Users\\Jimmy\\AppData\\Local\\Programs\\Notion\\Notion.exe"'),
-    },
-    "obsidian": {
-        "keywords": ["obsidian"],
-        "display_name": "Obsidian",
-        "action": lambda: os.system('start "" "C:\\Users\\Jimmy\\AppData\\Local\\Programs\\Obsidian\\Obsidian.exe"'),
-    },
-    "ollama": {
-        "keywords": ["ollama"],
-        "display_name": "Ollama",
-        "action": lambda: os.system('start "" "C:\\Users\\Jimmy\\AppData\\Local\\Programs\\Ollama\\ollama app.exe"'),
-    },
-    "whatsapp": {
-        "keywords": ["whatsapp"],
-        "display_name": "WhatsApp",
-        "action": lambda: os.system("start whatsapp:"),
-    },
-    "youtube": {
-        "keywords": ["youtube", "utube"],
-        "display_name": "YouTube (Brave App)",
-        "action": lambda: os.system('start "" "C:\\Users\\Jimmy\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Brave Apps\\YouTube.lnk"'),
-    },
-    "editor": {
-        "keywords": ["editor", "notepad"],
-        "display_name": "Notepad / Editor",
-        "action": lambda: os.system("start notepad.exe"),
-    },
-    "browser": {
-        "keywords": ["browser", "chrome", "edge", "web", "google", "internet"],
-        "display_name": "Web Browser",
-        "action": lambda: webbrowser.open("https://www.google.com"),
-    },
-}
-
-
-def process_command(command_text: str) -> bool:
+def process_command(command_text: str, llm: GeminiLLM) -> bool:
     """
-    Processes recognized text using 'contains keyword' matching logic.
+    Processes transcribed voice commands using Gemini LLM intent parsing
+    and dynamic application launching.
     
-    :param command_text: The transcribed string from Vosk STT.
-    :return: True if a stop/exit keyword was detected, False otherwise.
+    :param command_text: Transcribed user command from Vosk STT.
+    :param llm: Initialized GeminiLLM instance.
+    :return: True if a stop/exit action was requested, False otherwise.
     """
-    cmd_lower = command_text.lower().strip()
+    print(f"\n[Gemini LLM]: Interpreting command: \"{command_text}\"...")
+    
+    intent = llm.parse_command_intent(command_text)
+    action = intent.get("action", "general_response")
+    target = intent.get("target", "")
+    explanation = intent.get("explanation", "")
 
-    # Contains-keyword matching for stop/exit commands
-    stop_keywords = ["stop", "exit", "quit", "goodbye", "bye"]
-    if any(keyword in cmd_lower for keyword in stop_keywords):
-        print("🛑 Stop keyword detected! Shutting down Jarvis voice loop...")
-        return True
+    print(f"[Intent Parsed]: Action = '{action}' | Target = '{target}'")
+    if explanation:
+        print(f"[Reasoning]: {explanation}")
 
-    # Check for registered application commands
-    app_launched = False
-    for app_id, app_info in APPS_CONFIG.items():
-        if any(kw in cmd_lower for kw in app_info["keywords"]):
-            print(f"🚀 [Jarvis Action]: Opening {app_info['display_name']}...")
-            app_info["action"]()
-            app_launched = True
-            break
-
-    if app_launched:
+    # 1. Action: Open / Launch Application
+    if action == "open_app":
+        success = launch_application(target)
+        if not success:
+            print(f"[Jarvis]: Could not locate application '{target}' on this device.")
         return False
 
-    # Contains-keyword matching for other non-app actions
-    if "time" in cmd_lower:
-        current_time_str = time.strftime("%I:%M %p")
-        print(f"⏰ [Jarvis Action]: The current time is {current_time_str}")
-    elif "date" in cmd_lower or "today" in cmd_lower:
-        current_date_str = time.strftime("%A, %B %d, %Y")
-        print(f"📅 [Jarvis Action]: Today's date is {current_date_str}")
-    elif "name" in cmd_lower:
-        print("🤖 [Jarvis Action]: My name is Jarvis, your AI assistant.")
-    elif "open" in cmd_lower:
-        # Generic fallback for unknown open commands
-        target = cmd_lower.split("open", 1)[1].strip()
-        print(f"🚀 [Jarvis Action]: Opening '{target if target else 'requested item'}'...")
-    elif "how are you" in cmd_lower:
-        print("😊 [Jarvis Action]: I am running smoothly and ready for your command!")
-    else:
-        print(f"💡 [Jarvis Action]: Command received containing: \"{command_text}\"")
+    # 2. Action: Web Search / Open URL
+    elif action == "web_search" or action == "open_url":
+        url = target if target.startswith("http") else f"https://www.google.com/search?q={target}"
+        print(f"[Jarvis Action]: Opening Web Browser -> {url}")
+        webbrowser.open(url)
+        return False
 
-    return False
+    # 3. Action: Stop / Shutdown Jarvis
+    elif action == "stop":
+        print("[Jarvis Action]: Stop request received! Shutting down Jarvis voice loop...")
+        return True
+
+    # 4. Action: General Conversational Response
+    elif action == "general_response":
+        print(f"[Jarvis AI]: {target}")
+        return False
+
+    # Fallback default
+    else:
+        print(f"[Jarvis AI]: {target if target else 'Command processed.'}")
+        return False
 
 
 def listen_and_transcribe(
@@ -120,10 +89,11 @@ def listen_and_transcribe(
 ):
     """
     Continuous voice loop:
-    1. Listens for wake word using openWakeWord.
-    2. Upon detection, records user speech for `listen_duration` seconds.
-    3. Transcribes the recorded speech using Vosk STT.
-    4. Evaluates commands using 'contains keyword' matching.
+    1. Listens for wake word ('Hey Jarvis') using openWakeWord.
+    2. Upon detection, records speech for `listen_duration` seconds.
+    3. Transcribes recorded speech using Vosk STT.
+    4. Passes transcription to Gemini LLM for intent interpretation.
+    5. Dynamically launches requested application or handles request.
     """
     if wakeword_models is None:
         wakeword_models = ["hey_jarvis"]
@@ -132,6 +102,9 @@ def listen_and_transcribe(
         raise FileNotFoundError(
             f"Vosk model path '{vosk_model_path}' not found! Please check the folder."
         )
+
+    print("Initializing Gemini LLM engine...")
+    llm = GeminiLLM()
 
     print(f"Loading openWakeWord model(s): {wakeword_models}...")
     oww_model = Model(wakeword_models=wakeword_models, inference_framework="onnx")
@@ -154,14 +127,15 @@ def listen_and_transcribe(
         for m in wakeword_models
     ]
 
-    print("\n" + "=" * 55)
-    print(f" 🤖 Jarvis Voice System Active")
+    print("\n" + "=" * 60)
+    print(f" Jarvis Voice Control System Active")
     print(f" Wake word(s): {', '.join(clean_model_names)}")
     print(f" Detection threshold: {threshold}")
     print(f" Listening window: {listen_duration} seconds after trigger")
-    print(f" Command Matching: 'contains keyword' logic")
+    print(f" Intelligence Core: Gemini LLM ({llm.model_name})")
+    print(f" Application Launcher: Dynamic Windows Search (Zero Hardcoding)")
     print(" Press Ctrl+C to exit.")
-    print("=" * 55 + "\n")
+    print("=" * 60 + "\n")
 
     try:
         while True:
@@ -178,11 +152,11 @@ def listen_and_transcribe(
                 if score >= threshold:
                     clean_name = os.path.basename(model_name).replace(".onnx", "").replace(".tflite", "")
                     triggered_word = clean_name
-                    print(f"\n✨ Wake word detected! [{clean_name}] (Score: {score:.3f})")
+                    print(f"\n[Wake Word]: Detected [{clean_name}] (Score: {score:.3f})")
                     break
 
             if triggered_word:
-                print(f"🎙️ Listening for your command ({listen_duration}s)... Speak now!")
+                print(f"[Listening]: Listening for your command ({listen_duration}s)... Speak now!")
 
                 # Initialize fresh Vosk recognizer for command transcription
                 recognizer = KaldiRecognizer(vosk_model, sample_rate)
@@ -197,13 +171,13 @@ def listen_and_transcribe(
                 command_text = final_json.get("text", "").strip()
 
                 if command_text:
-                    print(f"🗣️ Jarvis heard: \"{command_text}\"")
-                    # Process command using 'contains keyword' matching logic
-                    should_exit = process_command(command_text)
+                    print(f"[Vosk STT]: User said: \"{command_text}\"")
+                    # Process command using Gemini LLM and dynamic app launcher
+                    should_exit = process_command(command_text, llm)
                     if should_exit:
                         break
                 else:
-                    print("⚠️ No speech detected or text recognized.")
+                    print("[Vosk STT]: No speech detected or text recognized.")
 
                 print("\nResuming wake word listening...")
                 # Reset openWakeWord model predictions buffer after command window
@@ -211,15 +185,28 @@ def listen_and_transcribe(
 
     except KeyboardInterrupt:
         print("\nStopping Jarvis voice loop...")
+    except Exception as err:
+        print(f"\n[Voice Loop Notice]: {err}")
     finally:
-        mic_stream.stop_stream()
-        mic_stream.close()
-        audio.terminate()
+        try:
+            if mic_stream and mic_stream.is_active():
+                mic_stream.stop_stream()
+        except Exception:
+            pass
+        try:
+            if mic_stream:
+                mic_stream.close()
+        except Exception:
+            pass
+        try:
+            audio.terminate()
+        except Exception:
+            pass
         print("Microphone stream closed.")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Jarvis Wake Word & Vosk STT Voice Loop")
+    parser = argparse.ArgumentParser(description="Jarvis LLM-Driven Voice Control System")
     parser.add_argument(
         "--models",
         nargs="+",
