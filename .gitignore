@@ -4,4 +4,8 @@ __pycache__/
 
 # API Keys & Sensitive Config
 config.py
-.env
+.env
+app_cache.json
+*.log
+
+

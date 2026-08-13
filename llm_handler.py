@@ -10,6 +10,7 @@ and automatic fallback models when free-tier rate limits (429) or invalid model 
 import os
 import sys
 import json
+import datetime
 from google import genai
 from google.genai import types
 import config
@@ -32,8 +33,25 @@ FALLBACK_MODELS = [
     "gemma-4-31b-it",
 ]
 
-INTENT_PARSER_SYSTEM_PROMPT = """You are the intelligence core of Jarvis AI assistant.
-Your job is to analyze the user's spoken voice command and convert it into a structured JSON action.
+
+def get_intent_parser_system_prompt() -> str:
+    """
+    Generates system prompt dynamically injected with current local time and date context.
+    Enforces ordered JSON lists for multi-step / compound voice commands.
+    """
+    now = datetime.datetime.now()
+    time_str = now.strftime("%I:%M %p")
+    date_str = now.strftime("%A, %B %d, %Y")
+
+    return f"""You are the intelligence core of Jarvis AI assistant.
+Current System Context:
+- Current Local Time: {time_str}
+- Current Local Date: {date_str}
+
+Your job is to analyze the user's spoken voice command and convert it into structured JSON action(s).
+
+CRITICAL RULE FOR MULTI-STEP / COMPOUND COMMANDS:
+If the user's voice command contains MULTIPLE actions or requests (for example: "tell me the time and open notion", "what is today's date and open calculator", "open brave and search for news"), you MUST return a JSON LIST containing EACH action object in the EXACT order requested by the user. Do NOT prioritize one action over another or skip any request!
 
 Available actions:
 1. "open_app": The user wants to open or launch an application installed on their computer (e.g., "open Notion", "launch calculator", "start Antigravity", "open Obsidian", "open YouTube app", "start notepad", "open brave browser").
@@ -42,15 +60,15 @@ Available actions:
    - Set "target" to the target URL or web search URL (e.g. "https://www.google.com/search?q=quantum+computing").
 3. "stop": The user wants to exit, stop, or turn off Jarvis (e.g., "stop", "exit", "quit", "goodbye", "turn off").
    - Set "target" to "exit".
-4. "general_response": The user is asking a general question, seeking information, or chatting with Jarvis (e.g., "what is the date?", "who created you?", "how are you doing?").
-   - Set "target" to a helpful, concise AI voice assistant response.
+4. "general_response": The user is asking a general question, asking for current time/date, or chatting with Jarvis (e.g., "what time is it?", "what is today's date?", "who created you?", "how are you doing?").
+   - Set "target" to a helpful, concise AI voice assistant response. (Use Current System Context to accurately answer time and date queries).
 
-You MUST respond strictly with valid JSON conforming to this schema:
-{
-  "action": "open_app" | "web_search" | "stop" | "general_response",
-  "target": "target app name OR search URL OR exit OR conversational response",
-  "explanation": "brief reasoning"
-}"""
+Response Format:
+- Always respond with a valid JSON array/list of action objects:
+  [
+    {{"action": "general_response", "target": "The current time is {time_str}.", "explanation": "Provide time"}},
+    {{"action": "open_app", "target": "Notion", "explanation": "Open Notion app"}}
+  ]"""
 
 
 class GeminiLLM:
@@ -79,11 +97,15 @@ class GeminiLLM:
         """
         Sends a text prompt to Gemini and returns the response with auto-fallback.
         """
+        now = datetime.datetime.now()
+        context = f"[Current Date/Time: {now.strftime('%A, %B %d, %Y %I:%M %p')}]\n"
+        full_prompt = context + prompt
+
         for model in self._get_model_cascade():
             try:
                 response = self.client.models.generate_content(
                     model=model,
-                    contents=prompt,
+                    contents=full_prompt,
                 )
                 self.model_name = model
                 return response.text
@@ -96,15 +118,16 @@ class GeminiLLM:
         
         return "Error: All Gemini models rate-limited or unavailable. Please try again shortly."
 
-    def parse_command_intent(self, command_text: str) -> dict:
+    def parse_command_intent(self, command_text: str) -> dict | list:
         """
-        Parses a transcribed user command into a structured intent dictionary.
+        Parses a transcribed user command into a structured intent dictionary or list of intents.
         Automatically cascades to fallback models if free-tier quota limits or model errors are hit.
         
         :param command_text: Transcribed voice command text.
-        :return: Dict containing 'action', 'target', and 'explanation'.
+        :return: Dict or List of Dicts containing 'action', 'target', and 'explanation'.
         """
         prompt = f"User voice command: \"{command_text}\""
+        system_instruction = get_intent_parser_system_prompt()
 
         for model in self._get_model_cascade():
             try:
@@ -112,7 +135,7 @@ class GeminiLLM:
                     model=model,
                     contents=prompt,
                     config=types.GenerateContentConfig(
-                        system_instruction=INTENT_PARSER_SYSTEM_PROMPT,
+                        system_instruction=system_instruction,
                         response_mime_type="application/json",
                         temperature=0.1,
                     )
@@ -123,22 +146,34 @@ class GeminiLLM:
             except Exception as e:
                 err_msg = str(e)
                 if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg or "404" in err_msg or "NOT_FOUND" in err_msg:
-                    print(f"[Gemini LLM]: Model '{model}' unavailable/quota limit hit. Cascading to fallback model...")
                     continue
                 else:
-                    print(f"[Gemini LLM]: Error with model '{model}': {e}")
                     continue
 
         # Heuristic fallback if all model calls fail
-        print("[Gemini LLM]: Falling back to local heuristic intent parser.")
         cmd_lower = command_text.lower().strip()
-        if any(w in cmd_lower for w in ["stop", "exit", "quit", "goodbye"]):
-            return {"action": "stop", "target": "exit", "explanation": "Fallback keyword stop"}
-        elif "open" in cmd_lower or "launch" in cmd_lower or "start" in cmd_lower:
-            words = cmd_lower.replace("open", "").replace("launch", "").replace("start", "").strip()
-            return {"action": "open_app", "target": words, "explanation": "Fallback keyword open"}
-        else:
-            return {"action": "general_response", "target": "I'm having trouble connecting right now.", "explanation": "Fallback"}
+        now = datetime.datetime.now()
+
+        # Split potential compound commands on ' and '
+        sub_commands = [c.strip() for c in cmd_lower.split(" and ") if c.strip()]
+        intents = []
+
+        for sub_cmd in sub_commands:
+            if any(w in sub_cmd for w in ["stop", "exit", "quit", "goodbye"]):
+                intents.append({"action": "stop", "target": "exit", "explanation": "Fallback keyword stop"})
+            elif "time" in sub_cmd or "clock" in sub_cmd:
+                t_str = now.strftime("%I:%M %p")
+                intents.append({"action": "general_response", "target": f"The current time is {t_str}.", "explanation": "Fallback time query"})
+            elif "date" in sub_cmd or "today" in sub_cmd or "day" in sub_cmd:
+                d_str = now.strftime("%A, %B %d, %Y")
+                intents.append({"action": "general_response", "target": f"Today is {d_str}.", "explanation": "Fallback date query"})
+            elif "open" in sub_cmd or "launch" in sub_cmd or "start" in sub_cmd:
+                words = sub_cmd.replace("open", "").replace("launch", "").replace("start", "").strip()
+                intents.append({"action": "open_app", "target": words, "explanation": "Fallback keyword open"})
+            else:
+                intents.append({"action": "general_response", "target": "Command processed.", "explanation": "Fallback"})
+
+        return intents if len(intents) > 1 else (intents[0] if intents else {"action": "general_response", "target": "I couldn't understand that command."})
 
 
 if __name__ == "__main__":
