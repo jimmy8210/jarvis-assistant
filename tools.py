@@ -25,8 +25,8 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 # Configure file logging for debug/warning logs (keeps console output clean)
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "jarvis.log")
-logger = logging.getLogger("JarvisTools")
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wednesday.log")
+logger = logging.getLogger("WednesdayTools")
 logger.setLevel(logging.INFO)
 if not logger.handlers:
     file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
@@ -35,7 +35,7 @@ if not logger.handlers:
     logger.addHandler(file_handler)
 
 # Initialize FastMCP Server
-mcp = FastMCP("JarvisTools")
+mcp = FastMCP("WednesdayTools")
 
 
 CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_cache.json")
@@ -288,7 +288,7 @@ def stop_assistant() -> str:
 
     :return: Exit message string.
     """
-    return "Stopping Jarvis voice loop. Goodbye!"
+    return "Stopping Wednesday voice loop. Goodbye!"
 
 
 @mcp.tool()
@@ -390,5 +390,5 @@ TOOL_MAP = {func.__name__: func for func in TOOLS}
 
 
 if __name__ == "__main__":
-    print("Starting Jarvis FastMCP Tools Server...")
+    print("Starting Wednesday FastMCP Tools Server...")
     mcp.run()

@@ -1,6 +1,6 @@
 """
-Jarvis Assistant - Legacy Entry Point Wrapper
-=============================================
+Wednesday Assistant - Legacy Entry Point Wrapper
+=================================================
 
 Redirects execution to main.py voice control pipeline.
 """
@@ -13,8 +13,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--models",
         nargs="+",
-        default=["hey_jarvis"],
-        help="Wake word models to use (e.g. hey_jarvis alexa)",
+        default=["wednesday.onnx"],
+        help="Wake word models to use (e.g. wednesday.onnx)",
     )
     parser.add_argument(
         "--threshold",

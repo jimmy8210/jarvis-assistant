@@ -25,8 +25,8 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 # Configure file logging for debug/warning logs (keeps console output clean)
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "jarvis.log")
-logger = logging.getLogger("JarvisBrain")
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wednesday.log")
+logger = logging.getLogger("WednesdayBrain")
 logger.setLevel(logging.INFO)
 if not logger.handlers:
     file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
@@ -58,7 +58,7 @@ def get_system_instruction() -> str:
     time_str = now.strftime("%I:%M %p")
     date_str = now.strftime("%A, %B %d, %Y")
 
-    return f"""You are the intelligence core of Jarvis AI assistant.
+    return f"""You are the intelligence core of Wednesday AI assistant.
 Current System Context:
 - Current Local Time: {time_str}
 - Current Local Date: {date_str}
@@ -70,7 +70,7 @@ Instructions:
 2. Use `close_app` when the user asks to close, quit, terminate, or shut down a running application on their computer (e.g., Notion, Calculator, Notepad, Obsidian).
 3. Use `web_search` when the user explicitly asks to perform a web search or navigate to a URL.
 4. Use `get_current_time` or `get_current_date` when asked about time or date.
-5. Use `stop_assistant` when the user asks to stop, exit, quit, or turn off Jarvis.
+5. Use `stop_assistant` when the user asks to stop, exit, quit, or turn off Wednesday.
 6. If the user prompt contains multiple requests, invoke all corresponding tools in order.
 7. Keep direct conversational responses clear, friendly, and concise for spoken delivery.
 

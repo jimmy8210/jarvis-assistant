@@ -26,8 +26,8 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 # Configure file logging for debug/warning logs (keeps console output clean)
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "jarvis.log")
-logger = logging.getLogger("JarvisMain")
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wednesday.log")
+logger = logging.getLogger("WednesdayMain")
 logger.setLevel(logging.INFO)
 if not logger.handlers:
     file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
@@ -53,14 +53,14 @@ def listen_and_transcribe(
 ):
     """
     Continuous voice loop with Dynamic VAD Listening:
-    1. Listens for wake word ('Hey Jarvis') using openWakeWord.
+    1. Listens for wake word ('Wednesday') using openWakeWord.
     2. Upon detection, records 30ms audio chunks dynamically using webrtcvad.
     3. Continues recording while speech is active; stops upon continuous silence.
     4. Transcribes recorded speech using Vosk STT.
     5. Hands transcribed text to brain.process_command() and outputs response.
     """
     if wakeword_models is None:
-        wakeword_models = ["hey_jarvis"]
+        wakeword_models = ["wednesday.onnx"]
 
     if not os.path.exists(vosk_model_path):
         raise FileNotFoundError(
@@ -94,7 +94,7 @@ def listen_and_transcribe(
     ]
 
     print("\n" + "=" * 60)
-    print(f" Jarvis Voice Control System Active")
+    print(f" Wednesday Voice Control System Active")
     print(f" Wake word(s): {', '.join(clean_model_names)}")
     print(f" Detection threshold: {threshold}")
     print(f" Dynamic Listening: Active ({silence_duration}s silence threshold)")
@@ -175,18 +175,18 @@ def listen_and_transcribe(
                     print(f"[User]: \"{transcribed_text}\"")
                     # Single call to brain.process_command
                     response = brain.process_command(transcribed_text)
-                    print(f"[Jarvis]: {response}\n")
+                    print(f"[Wednesday]: {response}\n")
 
-                    if "Stopping Jarvis voice loop" in response or "Goodbye!" in response:
+                    if "Stopping Wednesday voice loop" in response or "Goodbye!" in response:
                         break
                 else:
-                    print("[Jarvis]: No speech recognized.\n")
+                    print("[Wednesday]: No speech recognized.\n")
 
                 # Reset openWakeWord model predictions buffer after command window
                 oww_model.reset()
 
     except KeyboardInterrupt:
-        print("\nStopping Jarvis voice loop...")
+        print("\nStopping Wednesday voice loop...")
     except Exception as err:
         logger.error(f"[Voice Loop Notice]: {err}")
 
@@ -209,12 +209,12 @@ def listen_and_transcribe(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Jarvis LLM-Driven Voice Control System")
+    parser = argparse.ArgumentParser(description="Wednesday Assistant LLM-Driven Voice Control System")
     parser.add_argument(
         "--models",
         nargs="+",
-        default=["hey_jarvis"],
-        help="Wake word models to use (e.g. hey_jarvis alexa)",
+        default=["wednesday.onnx"],
+        help="Wake word models to use (e.g. wednesday.onnx)",
     )
     parser.add_argument(
         "--threshold",
