@@ -1,44 +1,27 @@
-"""
-Jarvis Assistant - Main Voice Loop Module
-=========================================
-
-Handles the voice pipeline exclusively: wake word detection (openWakeWord),
-dynamic voice activity detection (webrtcvad), and Vosk speech-to-text transcription.
-Delegates command interpretation and tool execution entirely to brain.py.
-"""
-
-import os
-import sys
-import json
-import time
 import argparse
+import json
 import logging
+import os
+import time
 import numpy as np
 import pyaudio
 import webrtcvad
+
+import brain
+import tts_handler
 from openwakeword.model import Model
 from vosk import Model as VoskModel, KaldiRecognizer, SetLogLevel
 
-import brain
-
-# Force UTF-8 encoding for Windows console compatibility
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-
-# Configure file logging for debug/warning logs (keeps console output clean)
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wednesday.log")
+LOG_FILE = "wednesday.log"
 logger = logging.getLogger("WednesdayMain")
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.ERROR)
 if not logger.handlers:
     file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
     formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
-# Suppress verbose Vosk C++ logs
 SetLogLevel(-1)
-
-
 
 def listen_and_transcribe(
     wakeword_models: list[str] = None,
@@ -51,14 +34,6 @@ def listen_and_transcribe(
     initial_speech_timeout: float = 4.0,
     vad_mode: int = 2,
 ):
-    """
-    Continuous voice loop with Dynamic VAD Listening:
-    1. Listens for wake word ('Wednesday') using openWakeWord.
-    2. Upon detection, records 30ms audio chunks dynamically using webrtcvad.
-    3. Continues recording while speech is active; stops upon continuous silence.
-    4. Transcribes recorded speech using Vosk STT.
-    5. Hands transcribed text to brain.process_command() and outputs response.
-    """
     if wakeword_models is None:
         wakeword_models = ["wednesday.onnx"]
 
@@ -73,12 +48,13 @@ def listen_and_transcribe(
     print(f"Loading Vosk STT model from '{vosk_model_path}'...")
     vosk_model = VoskModel(vosk_model_path)
 
-    # Initialize WebRTC VAD (mode 2: balanced aggressiveness)
-    vad = webrtcvad.Vad(vad_mode)
-    vad_chunk_samples = 480  # 30ms at 16000Hz = 480 samples
-    vad_chunk_bytes = vad_chunk_samples * 2  # 16-bit mono = 960 bytes
+    print("[Wednesday TTS Engine Active (Ultra-Fast Neural Voice: en-US-AvaNeural)]")
+    tts_handler.get_speaker()
 
-    # PyAudio setup
+    vad = webrtcvad.Vad(vad_mode)
+    vad_chunk_samples = 480
+    vad_chunk_bytes = vad_chunk_samples * 2
+
     audio = pyaudio.PyAudio()
     mic_stream = audio.open(
         format=pyaudio.paInt16,
@@ -94,7 +70,7 @@ def listen_and_transcribe(
     ]
 
     print("\n" + "=" * 60)
-    print(f" Wednesday Voice Control System Active")
+    print(" Wednesday Voice Control System Active")
     print(f" Wake word(s): {', '.join(clean_model_names)}")
     print(f" Detection threshold: {threshold}")
     print(f" Dynamic Listening: Active ({silence_duration}s silence threshold)")
@@ -103,14 +79,11 @@ def listen_and_transcribe(
 
     try:
         while True:
-            # Read 16-bit PCM audio chunk from microphone
             raw_data = mic_stream.read(chunk_size, exception_on_overflow=False)
             audio_frame = np.frombuffer(raw_data, dtype=np.int16)
 
-            # Feed audio frame to openWakeWord model
             predictions = oww_model.predict(audio_frame)
 
-            # Check if any wake word score crosses threshold
             triggered_word = None
             for model_name, score in predictions.items():
                 if score >= threshold:
@@ -120,38 +93,34 @@ def listen_and_transcribe(
                     break
 
             if triggered_word:
-                print(f"[Listening]: Speak your command now...")
+                t_pipeline_start = time.perf_counter()
+                print("[Listening]: Speak your command now...")
 
-                # Initialize fresh Vosk recognizer for command transcription
                 recognizer = KaldiRecognizer(vosk_model, sample_rate)
 
                 speech_started = False
                 silent_chunks_count = 0
-                max_silent_chunks = int(silence_duration / 0.03)  # 30ms chunks count
+                max_silent_chunks = int(silence_duration / 0.03)
 
+                t_rec_start = time.perf_counter()
                 start_time = time.time()
                 while True:
                     now = time.time()
                     elapsed = now - start_time
 
-                    # Safety net 1: Max recording duration reached
                     if elapsed >= max_recording_time:
                         break
 
-                    # Safety net 2: Initial speech timeout if user hasn't spoken
                     if not speech_started and elapsed >= initial_speech_timeout:
-                        print(f"[Listening]: No speech detected.")
+                        print("[Listening]: No speech detected.")
                         break
 
-                    # Read 30ms audio chunk for VAD and Vosk
                     cmd_data = mic_stream.read(vad_chunk_samples, exception_on_overflow=False)
                     if len(cmd_data) != vad_chunk_bytes:
                         continue
 
-                    # Feed 30ms audio chunk into Vosk STT
                     recognizer.AcceptWaveform(cmd_data)
 
-                    # Check voice activity using webrtcvad
                     try:
                         is_speech = vad.is_speech(cmd_data, sample_rate)
                     except Exception:
@@ -167,22 +136,49 @@ def listen_and_transcribe(
                             if silent_chunks_count >= max_silent_chunks:
                                 break
 
-                # Get final transcription result from Vosk
+                t_rec_duration = time.perf_counter() - t_rec_start
+
+                t_stt_start = time.perf_counter()
                 final_json = json.loads(recognizer.FinalResult())
                 transcribed_text = final_json.get("text", "").strip()
+                t_stt_duration = time.perf_counter() - t_stt_start
 
                 if transcribed_text:
                     print(f"[User]: \"{transcribed_text}\"")
-                    # Single call to brain.process_command
-                    response = brain.process_command(transcribed_text)
+                    
+                    response, llm_total_time, tool_time, attempt_logs = brain.process_command_with_timing(transcribed_text)
                     print(f"[Wednesday]: {response}\n")
+                    
+                    tts_gen_time, tts_play_time = tts_handler.speak(response)
+
+                    t_total = time.perf_counter() - t_pipeline_start
+                    perceived_start = t_stt_duration + llm_total_time + tool_time + tts_gen_time
+
+                    print("=" * 68)
+                    print(" PIPELINE TIMING TELEMETRY REPORT")
+                    print("=" * 68)
+                    print(f" 1. Recording / VAD Listening      : {t_rec_duration:6.3f} s")
+                    print(f" 2. Vosk STT Transcription          : {t_stt_duration:6.3f} s")
+                    print(f" 3. Gemini LLM API Total Time       : {llm_total_time:6.3f} s  (Attempts: {len(attempt_logs)})")
+                    for log_entry in attempt_logs:
+                        att_num = log_entry['attempt']
+                        m_name = log_entry['model']
+                        status = log_entry['status']
+                        iso_t = log_entry['isolated_time']
+                        print(f"     └─ [Attempt {att_num}]: {m_name:32s} -> {status} in {iso_t:.3f} s")
+                    print(f" 4. Tool Execution (if any)         : {tool_time:6.3f} s")
+                    print(f" 5. TTS Audio Generation            : {tts_gen_time:6.3f} s")
+                    print(f" 6. Audio Playback Duration         : {tts_play_time:6.3f} s")
+                    print("-" * 68)
+                    print(f" TOTAL PIPELINE TIME                : {t_total:6.3f} s")
+                    print(f" TIME TO FIRST AUDIO SOUND (Delay)  : {perceived_start:6.3f} s")
+                    print("=" * 68 + "\n")
 
                     if "Stopping Wednesday voice loop" in response or "Goodbye!" in response:
                         break
                 else:
                     print("[Wednesday]: No speech recognized.\n")
 
-                # Reset openWakeWord model predictions buffer after command window
                 oww_model.reset()
 
     except KeyboardInterrupt:

@@ -1,11 +1,31 @@
+# Virtual Environment
 venv/
+env/
+ENV/
+
+# Python Cache & Bytecode
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
-# API Keys & Sensitive Config
+# Heavy Speech & AI Models (Vosk / XTTS / Cache)
+model/
+model_small_backup/
+downloads/
+
+# Generated Audio & Samples
+xtts_samples/
+*.wav
+*.mp3
+
+# API Keys, Secrets & App Cache
 config.py
 .env
+*.env
 app_cache.json
-*.log
 
-
+# Logs & Temporary Files
+*.log
+wednesday.log
+scratch/
